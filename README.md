@@ -13,7 +13,7 @@
 
 ---
 
-![Demo](https://via.placeholder.com/900x450/1a1b26/7aa2f7?text=Kondo+Terminal+Interface)
+![Demo](assets/demo.gif)
 
 </div>
 
@@ -82,7 +82,7 @@ kondo ~/Downloads
 │  1000 files     →  2.1 seconds   │
 │  Parallel       →  3-5x speedup  │
 │  Memory usage   →  ~8-12 MB      │
-│  Syscalls       →  99% reduction │
+│  Syscalls       →  reduced alot  │
 └──────────────────────────────────┘
 ```
 
@@ -111,8 +111,7 @@ kondo ~/Downloads
 ### Step 1
 **Clone Repository**
 ```bash
-git clone https://github.com/
-yourusername/kondo.git
+git clone https://github.com/Aelune/kondo.git
 ```
 
 </td>
@@ -302,7 +301,7 @@ min_similarity_score = 0.65      # Overall threshold for grouping
 </tr>
 </table>
 
-### Configuration Commands
+<!-- ### Configuration Commands
 
 <div align="center">
 
@@ -312,8 +311,8 @@ make config-edit     │  make config-path     │  make config-backup     │  
 
 </div>
 
----
-
+--- -->
+<!--
 ## Performance
 
 <div align="center">
@@ -360,7 +359,7 @@ make config-edit     │  make config-path     │  make config-backup     │  
 
 </div>
 
----
+--- -->
 
 ## Use Cases
 

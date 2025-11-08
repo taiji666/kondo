@@ -21,20 +21,6 @@ pub fn should_skip_file(filename: &str) -> bool {
         .any(|pattern| filename.contains(pattern))
 }
 
-/// Extracts a clean filename without extension
-// pub fn get_file_stem(path: &Path) -> Option<String> {
-//     path.file_stem()
-//         .and_then(|s| s.to_str())
-//         .map(|s| s.to_string())
-// }
-
-/// Gets the extension in lowercase
-// pub fn get_extension_lowercase(path: &Path) -> Option<String> {
-//     path.extension()
-//         .and_then(|ext| ext.to_str())
-//         .map(|ext| ext.to_lowercase())
-// }
-
 // ML-Based Similarity Detection
 
 /// Configuration for similarity detection
@@ -163,22 +149,66 @@ pub fn levenshtein_similarity(s1: &str, s2: &str) -> f64 {
     1.0 - (distance as f64 / max_len)
 }
 
-/// Tokenizes a filename into meaningful parts
-/// Splits on common delimiters and numbers
+/// Tokenizes a filename into meaningful parts - IMPROVED VERSION
+/// Now preserves meaningful phrases and handles common patterns better
 fn tokenize_filename(filename: &str) -> HashSet<String> {
     let mut tokens = HashSet::new();
 
     // Remove extension if present
-    let name = filename.split('.').next().unwrap_or(filename);
+    let name = filename.rsplit_once('.').map(|(n, _)| n).unwrap_or(filename);
+    let name_lower = name.to_lowercase();
 
-    // Split on common delimiters
-    let delimiters = ['-', '_', ' ', '.', '(', ')', '[', ']', '{', '}'];
+    // First, add the full name without delimiters as a token (helps with phrases)
+    let clean_full = name_lower
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect::<String>();
+
+    if !clean_full.trim().is_empty() {
+        tokens.insert(clean_full.trim().to_string());
+    }
+
+    // Extract common phrases that should stay together
+    let phrases = [
+        "whatsapp chat",
+        "whatsapp chats",
+        "whatsapp image",
+        "screenshot",
+        "screen shot",
+        "chatgpt",
+        "img_",
+        "photo",
+        "picture",
+        "document",
+        "download",
+    ];
+
+    for phrase in &phrases {
+        if name_lower.contains(phrase) {
+            tokens.insert(phrase.to_string());
+        }
+    }
+
+    // Now tokenize individual words
+    let delimiters = ['-', '_', '.', '(', ')', '[', ']', '{', '}'];
     let mut current_token = String::new();
 
     for c in name.chars() {
-        if delimiters.contains(&c) || c.is_numeric() {
+        if delimiters.contains(&c) {
             if !current_token.is_empty() {
-                tokens.insert(current_token.to_lowercase());
+                let token_lower = current_token.to_lowercase();
+                if token_lower.len() > 1 && !token_lower.chars().all(|c| c.is_numeric()) {
+                    tokens.insert(token_lower);
+                }
+                current_token.clear();
+            }
+        } else if c == ' ' {
+            // For spaces, we want to preserve word boundaries but also create word tokens
+            if !current_token.is_empty() {
+                let token_lower = current_token.to_lowercase();
+                if token_lower.len() > 1 && !token_lower.chars().all(|c| c.is_numeric()) {
+                    tokens.insert(token_lower);
+                }
                 current_token.clear();
             }
         } else {
@@ -187,7 +217,22 @@ fn tokenize_filename(filename: &str) -> HashSet<String> {
     }
 
     if !current_token.is_empty() {
-        tokens.insert(current_token.to_lowercase());
+        let token_lower = current_token.to_lowercase();
+        if token_lower.len() > 1 && !token_lower.chars().all(|c| c.is_numeric()) {
+            tokens.insert(token_lower);
+        }
+    }
+
+    // Also extract bigrams (two-word combinations) for better matching
+    let words: Vec<String> = name
+        .split(|c: char| !c.is_alphanumeric() && c != ' ')
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    for window in words.windows(2) {
+        let bigram = format!("{} {}", window[0], window[1]);
+        tokens.insert(bigram);
     }
 
     tokens
@@ -220,12 +265,6 @@ pub fn combined_similarity(s1: &str, s2: &str, config: &SimilarityConfig) -> f64
 
     (lev_sim * config.levenshtein_weight) + (jac_sim * config.jaccard_weight)
 }
-
-/// Checks if two filenames are similar enough to be grouped
-// pub fn are_files_similar(file1: &str, file2: &str, config: &SimilarityConfig) -> bool {
-//     let similarity = combined_similarity(file1, file2, config);
-//     similarity >= config.min_similarity_score
-// }
 
 /// Groups similar files together using clustering
 pub fn group_similar_files(filenames: &[String], config: &SimilarityConfig) -> Vec<FileGroup> {
@@ -329,16 +368,16 @@ fn smart_folder_naming(name: &str) -> String {
 
     // Pattern-based naming rules
     let patterns = [
-        // WhatsApp images
-        ("whatsapp", "WhatsAppImages"),
+        // WhatsApp
+        ("whatsapp chat", "WhatsAppChats"),
         ("whatsapp image", "WhatsAppImages"),
+        ("whatsapp", "WhatsApp"),
         // Screenshots
         ("screenshot", "Screenshots"),
         ("screen shot", "Screenshots"),
         ("screencapture", "Screenshots"),
         // ChatGPT images
         ("chatgpt", "ChatGPTImages"),
-        ("chatgpt image", "ChatGPTImages"),
         // Common document patterns
         ("document", "Documents"),
         ("report", "Reports"),
@@ -393,7 +432,7 @@ fn smart_folder_naming(name: &str) -> String {
         };
     }
 
-    // Ensure it's a valid folder name
+    // Ensure it's a valid folder name (Windows and Unix compatible)
     result
         .replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "")
         .trim()
@@ -401,14 +440,12 @@ fn smart_folder_naming(name: &str) -> String {
 }
 
 fn remove_date_patterns(s: &str) -> String {
-    // Simple pattern removal (without regex)
-    // Remove sequences like "20250825", "2025-08-25", etc.
     let mut cleaned = String::new();
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
 
     while i < chars.len() {
-        // Check for date-like patterns
+        // Check for date-like patterns (4 digits followed by more digits)
         if i + 7 < chars.len() && chars[i..i + 4].iter().all(|c| c.is_numeric()) {
             // Skip potential date
             i += 8;
@@ -533,12 +570,6 @@ pub fn organize_by_similarity(
                     skipped_details.push(SkippedFile {
                         filename: filename.clone(),
                         reason: SkipReason::SystemFile,
-                    });
-                    logger(&format!("Skipped system file: {}", filename));
-                }else if should_skip_file(filename) {
-                    skipped_details.push(SkippedFile {
-                        filename: filename.clone(),
-                        reason: SkipReason::AlreadyOrganized,
                     });
                     logger(&format!("Skipped system file: {}", filename));
                 } else {
@@ -875,7 +906,7 @@ impl FilenameTuiApp {
             ])
             .split(f.size());
 
-        // Title with emoji
+        // Title
         let title = Paragraph::new(" Kondo - Filename Similarity Organizer")
             .style(
                 Style::default()
@@ -1140,7 +1171,7 @@ impl FilenameTuiApp {
                 ),
             ]),
             Line::from(vec![
-                Span::raw("  Files skipped: "),
+                Span::raw(" Files skipped: "),
                 Span::styled(
                     result.files_skipped.to_string(),
                     Style::default().fg(Color::Yellow),
@@ -1192,7 +1223,7 @@ impl FilenameTuiApp {
 
         if !result.errors.is_empty() {
             lines.push(Line::from(Span::styled(
-                "!  Errors:",
+                "! Errors:",
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )));
             for error in result.errors.iter().take(5) {

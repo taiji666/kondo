@@ -1,4 +1,5 @@
 use chrono::Local;
+use serde::Deserialize;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -9,55 +10,119 @@ mod organizer;
 use organizer::categorise::{FileOrganizerConfig, TuiApp};
 use organizer::filename::{FilenameTuiApp, SimilarityConfig};
 
-/// Configuration structure that includes log file path
-#[derive(Debug, Clone)]
+/// Main configuration structure that includes all settings
+#[derive(Debug, Clone, Deserialize)]
 pub struct KondoConfig {
-    pub log_file: Option<PathBuf>,
+    #[serde(default)]
+    pub log_file: Option<String>,
+
+    #[serde(default)]
+    pub enable_smart_grouping: bool,
+
+    #[serde(default)]
+    pub similarity_config: SimilarityConfigToml,
+}
+
+/// TOML representation of similarity config
+#[derive(Debug, Clone, Deserialize)]
+pub struct SimilarityConfigToml {
+    #[serde(default = "default_levenshtein_threshold")]
+    pub levenshtein_threshold: f64,
+
+    #[serde(default = "default_jaccard_threshold")]
+    pub jaccard_threshold: f64,
+
+    #[serde(default = "default_levenshtein_weight")]
+    pub levenshtein_weight: f64,
+
+    #[serde(default = "default_jaccard_weight")]
+    pub jaccard_weight: f64,
+
+    #[serde(default = "default_min_similarity_score")]
+    pub min_similarity_score: f64,
+}
+
+// Default functions for serde
+fn default_levenshtein_threshold() -> f64 { 0.7 }
+fn default_jaccard_threshold() -> f64 { 0.5 }
+fn default_levenshtein_weight() -> f64 { 0.6 }
+fn default_jaccard_weight() -> f64 { 0.4 }
+fn default_min_similarity_score() -> f64 { 0.65 }
+
+impl Default for SimilarityConfigToml {
+    fn default() -> Self {
+        Self {
+            levenshtein_threshold: 0.7,
+            jaccard_threshold: 0.5,
+            levenshtein_weight: 0.6,
+            jaccard_weight: 0.4,
+            min_similarity_score: 0.65,
+        }
+    }
 }
 
 impl Default for KondoConfig {
     fn default() -> Self {
-        Self { log_file: None }
+        Self {
+            log_file: None,
+            enable_smart_grouping: false,
+            similarity_config: SimilarityConfigToml::default(),
+        }
     }
 }
 
-/// Gets the config file path: ~/.config/kondo/kondo.toml
-fn get_config_path() -> std::io::Result<PathBuf> {
-    let home_dir = if let Ok(home) = env::var("HOME") {
-        PathBuf::from(home)
-    } else if let Ok(user_profile) = env::var("USERPROFILE") {
-        PathBuf::from(user_profile)
-    } else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not determine home directory",
-        ));
-    };
+/// Convert TOML config to runtime config
+impl From<SimilarityConfigToml> for SimilarityConfig {
+    fn from(toml_config: SimilarityConfigToml) -> Self {
+        SimilarityConfig {
+            levenshtein_threshold: toml_config.levenshtein_threshold,
+            jaccard_threshold: toml_config.jaccard_threshold,
+            levenshtein_weight: toml_config.levenshtein_weight,
+            jaccard_weight: toml_config.jaccard_weight,
+            min_similarity_score: toml_config.min_similarity_score,
+        }
+    }
+}
 
-    let config_dir = home_dir.join(".config").join("kondo");
+/// Gets the config directory path in a cross-platform way
+fn get_config_dir() -> std::io::Result<PathBuf> {
+    let config_dir = if cfg!(target_os = "windows") {
+        // Windows: Use %APPDATA%\kondo
+        let appdata = env::var("APPDATA").map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Could not determine APPDATA directory",
+            )
+        })?;
+        PathBuf::from(appdata).join("kondo")
+    } else {
+        // Unix/Linux/macOS: Use ~/.config/kondo
+        let home = env::var("HOME").map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Could not determine HOME directory",
+            )
+        })?;
+        PathBuf::from(home).join(".config").join("kondo")
+    };
 
     if !config_dir.exists() {
         fs::create_dir_all(&config_dir)?;
         println!("Created config directory: {}", config_dir.display());
     }
 
+    Ok(config_dir)
+}
+
+/// Gets the config file path: Windows: %APPDATA%\kondo\kondo.toml, Unix: ~/.config/kondo/kondo.toml
+fn get_config_path() -> std::io::Result<PathBuf> {
+    let config_dir = get_config_dir()?;
     Ok(config_dir.join("kondo.toml"))
 }
 
-/// Gets the default log file path: ~/.config/kondo/kondo.log
+/// Gets the default log file path: Windows: %APPDATA%\kondo\kondo.log, Unix: ~/.config/kondo/kondo.log
 fn get_default_log_path() -> std::io::Result<PathBuf> {
-    let home_dir = if let Ok(home) = env::var("HOME") {
-        PathBuf::from(home)
-    } else if let Ok(user_profile) = env::var("USERPROFILE") {
-        PathBuf::from(user_profile)
-    } else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not determine home directory",
-        ));
-    };
-
-    let config_dir = home_dir.join(".config").join("kondo");
+    let config_dir = get_config_dir()?;
     Ok(config_dir.join("kondo.log"))
 }
 
@@ -65,33 +130,60 @@ fn get_default_log_path() -> std::io::Result<PathBuf> {
 fn load_kondo_config() -> KondoConfig {
     let config_path = match get_config_path() {
         Ok(path) => path,
-        Err(_) => return KondoConfig::default(),
+        Err(e) => {
+            eprintln!("Warning: Could not determine config path: {}", e);
+            return KondoConfig::default();
+        }
     };
 
     if config_path.exists() {
-        // Try to read and parse config
-        if let Ok(content) = fs::read_to_string(&config_path) {
-            // Simple TOML parsing for log_file key
-            for line in content.lines() {
-                let line = line.trim();
-                if line.starts_with("log_file") && line.contains('=') {
-                    if let Some(value) = line.split('=').nth(1) {
-                        let value = value.trim().trim_matches('"').trim_matches('\'');
-                        if !value.is_empty() && value != "none" {
-                            return KondoConfig {
-                                log_file: Some(PathBuf::from(value)),
-                            };
+        // Try to read and parse config using proper TOML deserialization
+        match fs::read_to_string(&config_path) {
+            Ok(content) => {
+                match toml::from_str::<KondoConfig>(&content) {
+                    Ok(mut config) => {
+                        // Convert relative log path to absolute if needed
+                        if let Some(ref log_file) = config.log_file {
+                            if log_file != "none" && !log_file.is_empty() {
+                                let log_path = PathBuf::from(log_file);
+                                // If it's a relative path, make it absolute relative to config dir
+                                if log_path.is_relative() {
+                                    if let Ok(config_dir) = get_config_dir() {
+                                        config.log_file = Some(config_dir.join(log_path).to_string_lossy().to_string());
+                                    }
+                                }
+                            } else {
+                                config.log_file = None;
+                            }
                         }
+
+                        println!("✓ Loaded configuration from: {}", config_path.display());
+                        return config;
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Could not parse config file: {}", e);
+                        eprintln!("Using default configuration...");
                     }
                 }
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not read config file: {}", e);
             }
         }
     } else {
         // Create default config file with logging enabled
         let default_log_path = match get_default_log_path() {
             Ok(path) => path,
-            Err(_) => return KondoConfig::default(),
+            Err(e) => {
+                eprintln!("Warning: Could not determine log path: {}", e);
+                return KondoConfig::default();
+            }
         };
+
+        // Convert path to string with forward slashes for cross-platform TOML compatibility
+        let log_path_str = default_log_path
+            .to_string_lossy()
+            .replace('\\', "/");
 
         let config_content = format!(
             r#"# Kondo File Organizer Configuration
@@ -102,6 +194,7 @@ batch_size = 100
 # even if they have different extensions
 enable_smart_grouping = false
 log_file = "{}"
+
 # Files/patterns to skip during organization
 skip_patterns = [
     ".DS_Store",
@@ -112,7 +205,7 @@ skip_patterns = [
     ".localized"
 ]
 
-# Smart grouping configuration (only used if enable_smart_grouping = true)
+# Smart grouping configuration (used in filename similarity mode)
 [similarity_config]
 # Levenshtein distance threshold (0.0 to 1.0)
 # Higher = stricter matching. Measures character-level similarity.
@@ -201,7 +294,7 @@ folder_name = "Design Files"
 # folder_name = "My Custom Folder"
 
 "#,
-            default_log_path.display()
+            log_path_str
         );
 
         if let Err(e) = fs::write(&config_path, config_content) {
@@ -211,7 +304,9 @@ folder_name = "Design Files"
         }
 
         return KondoConfig {
-            log_file: Some(default_log_path),
+            log_file: Some(log_path_str),
+            enable_smart_grouping: false,
+            similarity_config: SimilarityConfigToml::default(),
         };
     }
 
@@ -219,19 +314,19 @@ folder_name = "Design Files"
 }
 
 /// Log a message to the configured log file
-fn log_to_file(log_path: &Option<PathBuf>, message: &str) {
-    if let Some(path) = log_path {
+fn log_to_file(log_path: &Option<String>, message: &str) {
+    if let Some(path_str) = log_path {
+        let path = PathBuf::from(path_str);
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
         let log_message = format!("[{}] {}\n", timestamp, message);
 
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
             let _ = file.write_all(log_message.as_bytes());
         }
     }
 }
 
 fn print_help() {
-    // println!(" Kondo - File Organizer");
     println!("╔═══════════════════════════════════════════════════╗");
     println!("║                                                   ║");
     println!("║   ██╗  ██╗ ██████╗ ███╗   ██╗██████╗  ██████╗     ║");
@@ -240,9 +335,6 @@ fn print_help() {
     println!("║   ██╔═██╗ ██║   ██║██║╚██╗██║██║  ██║██║   ██║    ║");
     println!("║   ██║  ██╗╚██████╔╝██║ ╚████║██████╔╝╚██████╔╝    ║");
     println!("║   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═════╝  ╚═════╝     ║");
-    // println!("║                                                ║");
-    // println!("║   The Art of Tidying Your Digital Life   ║");
-    // println!("║                                               ║");
     println!("║    ML-Powered • Blazingly Fast • Beautiful TUI    ║");
     println!("║                                                   ║");
     println!("╚═══════════════════════════════════════════════════╝");
@@ -254,15 +346,6 @@ fn print_help() {
     );
     println!("    -f, --filename      Group similar files based on filename patterns");
     println!("    -h, --help          Show this help message\n");
-    // println!("EXAMPLES:");
-    // println!("    kondo -c                  # Categorize files in current directory");
-    // println!("    kondo -c ~/Downloads      # Categorize files in Downloads folder");
-    // println!("    kondo -f                  # Group similar files in current directory");
-    // println!("    kondo -f ~/Documents      # Group similar files in Documents folder\n");
-    // println!("CONFIG:");
-    // println!("    Config file location: ~/.config/kondo/kondo.toml");
-    // println!("    Log file location: Set in kondo.toml (default: ~/.config/kondo/kondo.log)");
-    // println!("    Edit config file to customize categories, extensions, and logging");
 }
 
 fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::io::Result<()> {
@@ -281,7 +364,7 @@ fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::
     println!(" Config location: {}", config_path.display());
 
     if let Some(log_path) = &kondo_config.log_file {
-        println!(" Logging to: {}", log_path.display());
+        println!(" Logging to: {}", log_path);
     }
 
     // Load or create config
@@ -358,16 +441,33 @@ fn run_filename_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::io
         &format!("Target directory: {}", target_dir.display()),
     );
 
-    println!(" Kondo - Filename Similarity Mode\n");
-    println!(" Target directory: {}\n", target_dir.display());
+    println!(" Kondo - Filename Similarity Mode");
 
     if let Some(log_path) = &kondo_config.log_file {
-        println!(" Logging to: {}\n", log_path.display());
+        println!(" Logging to: {}\n", log_path);
     }
 
-    // Launch TUI
-    let config = SimilarityConfig::default();
-    let mut app = FilenameTuiApp::new(target_dir, config);
+    println!(" Target directory: {}", target_dir.display());
+
+    // Load similarity config from kondo.toml
+    let similarity_config: SimilarityConfig = kondo_config.similarity_config.clone().into();
+
+    println!(" Similarity thresholds:");
+    println!("   • Levenshtein weight: {:.2}", similarity_config.levenshtein_weight);
+    println!("   • Jaccard weight: {:.2}", similarity_config.jaccard_weight);
+    println!("   • Min similarity score: {:.2}\n", similarity_config.min_similarity_score);
+
+    log_to_file(
+        &kondo_config.log_file,
+        &format!("Using similarity config: min_score={:.2}, lev_weight={:.2}, jac_weight={:.2}",
+            similarity_config.min_similarity_score,
+            similarity_config.levenshtein_weight,
+            similarity_config.jaccard_weight
+        ),
+    );
+
+    // Launch TUI with config from kondo.toml
+    let mut app = FilenameTuiApp::new(target_dir, similarity_config);
     let result = app.run();
 
     // Get logs from the app and write them to file
@@ -388,7 +488,7 @@ fn run_filename_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::io
             println!("\n✦ File organization complete!");
 
             if let Some(log_path) = &kondo_config.log_file {
-                println!(" Full log available at: {}", log_path.display());
+                println!(" Full log available at: {}", log_path);
             }
         }
         Err(e) => {

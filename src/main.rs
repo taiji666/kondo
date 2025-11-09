@@ -157,7 +157,7 @@ fn load_kondo_config() -> KondoConfig {
                             }
                         }
 
-                        println!("✓ Loaded configuration from: {}", config_path.display());
+                        // println!("✓ Loaded configuration from: {}", config_path.display());
                         return config;
                     }
                     Err(e) => {
@@ -345,34 +345,39 @@ fn print_help() {
         "    -c, --categorize    Organize files by category (images, videos, documents, etc.)"
     );
     println!("    -f, --filename      Group similar files based on filename patterns");
-    println!("    -h, --help          Show this help message\n");
+    println!("    -nui, --no-ui       Skip UI and automatically organize files");
+    println!("    -h, --help          Show this help message");
+    println!("\nEXAMPLES:");
+    println!("    kondo -c /path/to/folder          # Interactive categorization");
+    println!("    kondo -c -nui /path/to/folder     # Auto-categorize without UI");
+    println!("    kondo -f -nui /path/to/folder     # Auto-group by filename without UI\n");
 }
 
-fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::io::Result<()> {
+fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig, no_ui: bool) -> std::io::Result<()> {
     let config_path = get_config_path()?;
 
     log_to_file(
         &kondo_config.log_file,
-        "=== Starting Kondo (Categorize Mode) ===",
+        &format!("=== Starting Kondo (Categorize Mode - No UI: {}) ===", no_ui),
     );
     log_to_file(
         &kondo_config.log_file,
         &format!("Target directory: {}", target_dir.display()),
     );
 
-    println!(" Kondo - Categorize Mode");
-    println!(" Config location: {}", config_path.display());
+    println!("Kondo - Categorize Mode");
+    // println!("📍 Config location: {}", config_path.display());
 
-    if let Some(log_path) = &kondo_config.log_file {
-        println!(" Logging to: {}", log_path);
-    }
+    // if let Some(log_path) = &kondo_config.log_file {
+    //     println!("📝 Logging to: {}", log_path);
+    // }
 
     // Load or create config
     let config = if config_path.exists() {
-        println!("✓ Loading existing config...");
+        // println!("✓ Loading existing config...");
         match FileOrganizerConfig::load_from_file(&config_path) {
             Ok(cfg) => {
-                println!("✓ Config loaded successfully");
+                // println!("✓ Config loaded successfully");
                 log_to_file(&kondo_config.log_file, "Config loaded successfully");
                 cfg
             }
@@ -387,7 +392,7 @@ fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::
             }
         }
     } else {
-        println!(" No config file found, creating default config...");
+        println!("ℹ  No config file found, creating default config...");
         let default_config = FileOrganizerConfig::default();
 
         if let Err(e) = default_config.save_to_file(&config_path) {
@@ -405,11 +410,17 @@ fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::
         default_config
     };
 
-    println!(" Target directory: {}\n", target_dir.display());
+    // println!("🎯 Target directory: {}\n", target_dir.display());
 
-    // Launch TUI
+    // Launch TUI or auto-organize
     let mut app = TuiApp::new(config, target_dir);
-    let result = app.run();
+
+    let result = if no_ui {
+        // println!("⚡ Auto-organizing files without UI...\n");
+        app.auto_organize()
+    } else {
+        app.run()
+    };
 
     // Log completion
     match &result {
@@ -418,7 +429,7 @@ fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::
                 &kondo_config.log_file,
                 "Organization completed successfully",
             );
-            println!("File organization complete!");
+            println!("\n✦ File organization complete!");
         }
         Err(e) => {
             log_to_file(
@@ -431,31 +442,31 @@ fn run_categorize_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::
     result
 }
 
-fn run_filename_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::io::Result<()> {
+fn run_filename_mode(target_dir: PathBuf, kondo_config: &KondoConfig, no_ui: bool) -> std::io::Result<()> {
     log_to_file(
         &kondo_config.log_file,
-        "=== Starting Kondo (Filename Similarity Mode) ===",
+        &format!("=== Starting Kondo (Filename Similarity Mode - No UI: {}) ===", no_ui),
     );
     log_to_file(
         &kondo_config.log_file,
         &format!("Target directory: {}", target_dir.display()),
     );
 
-    println!(" Kondo - Filename Similarity Mode");
+    println!("Kondo - Filename Similarity Mode");
 
-    if let Some(log_path) = &kondo_config.log_file {
-        println!(" Logging to: {}\n", log_path);
-    }
+    // if let Some(log_path) = &kondo_config.log_file {
+    //     println!("📝 Logging to: {}\n", log_path);
+    // }
 
-    println!(" Target directory: {}", target_dir.display());
+    // println!("🎯 Target directory: {}", target_dir.display());
 
     // Load similarity config from kondo.toml
     let similarity_config: SimilarityConfig = kondo_config.similarity_config.clone().into();
 
-    println!(" Similarity thresholds:");
-    println!("   • Levenshtein weight: {:.2}", similarity_config.levenshtein_weight);
-    println!("   • Jaccard weight: {:.2}", similarity_config.jaccard_weight);
-    println!("   • Min similarity score: {:.2}\n", similarity_config.min_similarity_score);
+    // println!("⚙️  Similarity thresholds:");
+    // println!("   • Levenshtein weight: {:.2}", similarity_config.levenshtein_weight);
+    // println!("   • Jaccard weight: {:.2}", similarity_config.jaccard_weight);
+    // println!("   • Min similarity score: {:.2}\n", similarity_config.min_similarity_score);
 
     log_to_file(
         &kondo_config.log_file,
@@ -466,9 +477,15 @@ fn run_filename_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::io
         ),
     );
 
-    // Launch TUI with config from kondo.toml
+    // Launch TUI or auto-organize
     let mut app = FilenameTuiApp::new(target_dir, similarity_config);
-    let result = app.run();
+
+    let result = if no_ui {
+        // println!("⚡ Auto-analyzing and organizing files without UI...\n");
+        app.auto_organize()
+    } else {
+        app.run()
+    };
 
     // Get logs from the app and write them to file
     if kondo_config.log_file.is_some() {
@@ -487,9 +504,9 @@ fn run_filename_mode(target_dir: PathBuf, kondo_config: &KondoConfig) -> std::io
             );
             println!("\n✦ File organization complete!");
 
-            if let Some(log_path) = &kondo_config.log_file {
-                println!(" Full log available at: {}", log_path);
-            }
+            // if let Some(log_path) = &kondo_config.log_file {
+            //     println!("📄 Full log available at: {}", log_path);
+            // }
         }
         Err(e) => {
             log_to_file(
@@ -514,6 +531,9 @@ fn main() {
         process::exit(0);
     }
 
+    // Check for -nui flag
+    let no_ui = args.contains(&"-nui".to_string()) || args.contains(&"--no-ui".to_string());
+
     let mode = &args[1];
 
     // Parse arguments
@@ -523,8 +543,31 @@ fn main() {
             process::exit(0);
         }
         "-c" | "--categorize" => {
+            // Find target directory (skip -nui flag if present)
             let target_dir = if args.len() > 2 {
-                PathBuf::from(&args[2])
+                let mut path_arg = None;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 1 && arg != "-nui" && arg != "--no-ui" {
+                        path_arg = Some(arg);
+                        break;
+                    }
+                }
+
+                if let Some(path) = path_arg {
+                    PathBuf::from(path)
+                } else {
+                    match env::current_dir() {
+                        Ok(dir) => dir,
+                        Err(e) => {
+                            eprintln!("✗ Error: Could not get current directory: {}", e);
+                            log_to_file(
+                                &kondo_config.log_file,
+                                &format!("Error: Could not get current directory: {}", e),
+                            );
+                            process::exit(1);
+                        }
+                    }
+                }
             } else {
                 match env::current_dir() {
                     Ok(dir) => dir,
@@ -551,15 +594,38 @@ fn main() {
                 process::exit(1);
             }
 
-            if let Err(e) = run_categorize_mode(target_dir, &kondo_config) {
+            if let Err(e) = run_categorize_mode(target_dir, &kondo_config, no_ui) {
                 eprintln!("✗ Error: {}", e);
                 log_to_file(&kondo_config.log_file, &format!("Fatal error: {}", e));
                 process::exit(1);
             }
         }
         "-f" | "--filename" => {
+            // Find target directory (skip -nui flag if present)
             let target_dir = if args.len() > 2 {
-                PathBuf::from(&args[2])
+                let mut path_arg = None;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 1 && arg != "-nui" && arg != "--no-ui" {
+                        path_arg = Some(arg);
+                        break;
+                    }
+                }
+
+                if let Some(path) = path_arg {
+                    PathBuf::from(path)
+                } else {
+                    match env::current_dir() {
+                        Ok(dir) => dir,
+                        Err(e) => {
+                            eprintln!("✗ Error: Could not get current directory: {}", e);
+                            log_to_file(
+                                &kondo_config.log_file,
+                                &format!("Error: Could not get current directory: {}", e),
+                            );
+                            process::exit(1);
+                        }
+                    }
+                }
             } else {
                 match env::current_dir() {
                     Ok(dir) => dir,
@@ -586,11 +652,18 @@ fn main() {
                 process::exit(1);
             }
 
-            if let Err(e) = run_filename_mode(target_dir, &kondo_config) {
+            if let Err(e) = run_filename_mode(target_dir, &kondo_config, no_ui) {
                 eprintln!("✗ Error: {}", e);
                 log_to_file(&kondo_config.log_file, &format!("Fatal error: {}", e));
                 process::exit(1);
             }
+        }
+        "-nui" | "--no-ui" => {
+            eprintln!("✗ Error: -nui flag must be used with -c or -f mode");
+            eprintln!("\nExamples:");
+            eprintln!("  kondo -c -nui /path/to/folder");
+            eprintln!("  kondo -f -nui /path/to/folder");
+            process::exit(1);
         }
         _ => {
             eprintln!("✗ Error: Unknown option '{}'", mode);

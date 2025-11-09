@@ -120,6 +120,7 @@ fn create_default_categories() -> HashMap<String, CategoryConfig> {
     map
 }
 
+
 // Config Loading
 
 impl FileOrganizerConfig {
@@ -438,6 +439,8 @@ impl FileOrganizer {
 
 // TUI Implementation
 
+
+
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
@@ -748,6 +751,64 @@ impl TuiApp {
             .style(Style::default().fg(Color::Yellow))
             .block(Block::default().borders(Borders::ALL).title(" Controls "));
         f.render_widget(widget, area);
+    }
+
+    /// Auto-organize files without UI interaction
+    /// Automatically starts organization (equivalent to pressing 's')
+    pub fn auto_organize(&mut self) -> io::Result<()> {
+        // println!("📂 Scanning directory...");
+
+        // Start organization (non-dry-run mode)
+        self.start_organization(false)?;
+
+        // Display results
+        if let AppState::Complete(result) = &self.state {
+            println!("\n✦ Organization Complete!\n");
+            println!("Summary:");
+            println!("   • Files organized: {}", result.files_organized);
+            println!("   • Files skipped:   {}", result.files_skipped);
+            println!("   • Files failed:    {}", result.files_failed);
+
+            if !result.category_counts.is_empty() {
+                println!("\nCategories:");
+
+                // Sort categories by count
+                let mut sorted_categories: Vec<_> = result.category_counts.iter().collect();
+                sorted_categories.sort_by(|a, b| b.1.cmp(a.1));
+
+                for (category, count) in sorted_categories {
+                    let icon = match category.as_str() {
+                        name if name.contains("Image") => "",
+                        name if name.contains("Video") => "",
+                        name if name.contains("Audio") || name.contains("Music") => "🎵",
+                        name if name.contains("Document") => "",
+                        name if name.contains("Code") => "",
+                        name if name.contains("Archive") => "",
+                        name if name.contains("Spreadsheet") => "",
+                        name if name.contains("Presentation") => "",
+                        _ => "",
+                    };
+                    println!("   {} {:20} → {} files", icon, category, count);
+                }
+            }
+
+            // Show recent logs
+            let logs = self.organizer.get_logger().get_logs();
+            // if !logs.is_empty() {
+                // println!("\n Recent activity:");
+                // for log in logs.iter().rev().take(5) {
+                //     let icon = match log.level {
+                //         LogLevel::Success => "✓",
+                //         LogLevel::Error => "✗",
+                //         LogLevel::Warning => "⚠",
+                //         LogLevel::Info => "ℹ",
+                //     };
+                //     println!("   {} {}", icon, log.message);
+                // }
+            // }
+        }
+
+        Ok(())
     }
 }
 

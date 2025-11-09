@@ -1272,4 +1272,124 @@ impl FilenameTuiApp {
             Vec::new()
         }
     }
+    /// Auto-organize files without UI interaction
+    /// Automatically analyzes (press 'a') then organizes (press 's')
+    pub fn auto_organize(&mut self) -> io::Result<()> {
+        // println!("🔍 Analyzing files...");
+
+        // Step 1: Analyze files (equivalent to pressing 'a')
+        self.analyze_files()?;
+
+        // Display analysis results
+        if matches!(self.state, FilenameAppState::ReviewGroups) {
+            let grouped_count = self.groups.iter().filter(|g| g.files.len() > 1).count();
+            let single_count = self.groups.iter().filter(|g| g.files.len() == 1).count();
+            let total_files: usize = self.groups.iter().map(|g| g.files.len()).sum();
+
+            println!("\n✓ Analysis Complete!");
+            println!("   • Total files:        {}", total_files);
+            println!("   • Groups with 2+ files: {}", grouped_count);
+            println!("   • Single files:       {}", single_count);
+
+            // Show preview of groups
+            // if grouped_count > 0 {
+            //     println!("\n📁 Preview of file groups:");
+            //     let multi_file_groups: Vec<_> = self.groups.iter()
+            //         .filter(|g| g.files.len() > 1)
+            //         .collect();
+
+            //     for (i, group) in multi_file_groups.iter().take(5).enumerate() {
+            //         let folder_name = suggest_folder_name(group);
+            //         println!("   {}. {} ({} files, similarity: {:.0}%)",
+            //             i + 1,
+            //             folder_name,
+            //             group.files.len(),
+            //             group.avg_similarity * 100.0
+            //         );
+
+            //         // Show first 2 files
+            //         for (j, file) in group.files.iter().take(2).enumerate() {
+            //             println!("      {} {}",
+            //                 if j == 0 { "├─" } else { "└─" },
+            //                 file
+            //             );
+            //         }
+            //         if group.files.len() > 2 {
+            //             println!("      ... and {} more", group.files.len() - 2);
+            //         }
+            //     }
+
+            //     if multi_file_groups.len() > 5 {
+            //         println!("   ... and {} more groups", multi_file_groups.len() - 5);
+            //     }
+            // }
+
+            // println!("\n📂 Starting organization...");
+        }
+
+        // Step 2: Start organization (equivalent to pressing 's')
+        self.start_organization()?;
+
+        // Display organization results
+        if let FilenameAppState::Complete(result) = &self.state {
+            println!("\n✦ Organization Complete!\n");
+            println!("Summary:");
+            println!("   • Folders created: {}", result.folders_created);
+            println!("   • Files moved:     {}", result.files_moved);
+            println!("   • Files skipped:   {}", result.files_skipped);
+
+            // Show skipped files summary
+            if !result.skipped_details.is_empty() {
+                println!("\n⚠️  Skipped Files:");
+
+                let single_files = result.skipped_details.iter()
+                    .filter(|s| matches!(s.reason, SkipReason::SingleFile))
+                    .count();
+                let system_files = result.skipped_details.iter()
+                    .filter(|s| matches!(s.reason, SkipReason::SystemFile))
+                    .count();
+                let already_organized = result.skipped_details.iter()
+                    .filter(|s| matches!(s.reason, SkipReason::AlreadyOrganized))
+                    .count();
+
+                if single_files > 0 {
+                    println!("   • No similar matches: {}", single_files);
+                }
+                if system_files > 0 {
+                    println!("   • System files:       {}", system_files);
+                }
+                if already_organized > 0 {
+                    println!("   • Already organized:  {}", already_organized);
+                }
+
+                // Show first few skipped files
+                if result.skipped_details.len() <= 5 {
+                    println!("\n   Files:");
+                    for skip in &result.skipped_details {
+                        let reason_text = match skip.reason {
+                            SkipReason::SingleFile => "no matches",
+                            SkipReason::SystemFile => "system file",
+                            SkipReason::AlreadyOrganized => "already organized",
+                        };
+                        println!("   • {} ({})", skip.filename, reason_text);
+                    }
+                } else {
+                    println!("   (Use logs for full details)");
+                }
+            }
+
+            // Show errors if any
+            if !result.errors.is_empty() {
+                println!("\n❌ Errors:");
+                for (i, error) in result.errors.iter().enumerate().take(3) {
+                    println!("   {}. {}", i + 1, error);
+                }
+                if result.errors.len() > 3 {
+                    println!("   ... and {} more errors", result.errors.len() - 3);
+                }
+            }
+        }
+
+        Ok(())
+    }
 }

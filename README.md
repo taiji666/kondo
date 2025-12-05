@@ -131,6 +131,14 @@ git clone https://github.com/Aelune/kondo.git
 cd kondo
 make install
 ```
+### Android
+`termux`
+```bash
+chmod +x kondo-android-aarch64
+```
+```bash
+./kondo-android-aarch64 -c ~/storage/downloads
+```
 
 </td>
 </tr>
@@ -138,13 +146,7 @@ make install
 
 <div align="center">
 
-### Android
-```bash
-chmod +x kondo-android-aarch64
-```
-```bash
-./kondo-android-aarch64 -c ~/storage/downloads
-```
+
 **Requirements:** Rust 1.70+
 
 </div>

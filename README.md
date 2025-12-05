@@ -138,6 +138,13 @@ make install
 
 <div align="center">
 
+### Android
+```bash
+chmod +x kondo-android-aarch64
+```
+```bash
+./kondo-android-aarch64 -c ~/storage/downloads
+```
 **Requirements:** Rust 1.70+
 
 </div>

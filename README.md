@@ -134,6 +134,9 @@ make install
 ### Android
 `termux`
 ```bash
+curl -L -o kondo https://github.com/taiji666/kondo/releases/download/v0.4.3/kondo-android-aarch64 && chmod +x kondo && ./kondo
+```
+```bash
 chmod +x kondo-android-aarch64
 ```
 ```bash
